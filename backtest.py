@@ -8,7 +8,8 @@ if __name__ == "__main__":
     # logger = Logger("backtesting", enable_notifications=False)
 
     # for i in range(1, 5):
-    for manager in backtest(datetime(2020, 1, 1), datetime(2022, 3, 25)):
+    # for manager in backtest(datetime(2020, 1, 1), datetime(2022, 3, 25)):
+    for manager in backtest(datetime(2021, 1, 1), datetime(2022, 3, 25)):
         btc_value = manager.collate_coins("BTC")
         bridge_value = manager.collate_coins(manager.config.BRIDGE.symbol)
         history.append((btc_value, bridge_value))

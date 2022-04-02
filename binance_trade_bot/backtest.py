@@ -28,7 +28,7 @@ class MockBinanceManager(BinanceAPIManager):
         super().__init__(config, db, logger)
         self.config = config
         self.datetime = start_date or datetime(2021, 1, 1)
-        self.balances = start_balances or {config.BRIDGE.symbol: 500}
+        self.balances = start_balances or {config.BRIDGE.symbol: 100}
 
     def setup_websockets(self):
         pass  # No websockets are needed for backtesting
@@ -51,7 +51,8 @@ class MockBinanceManager(BinanceAPIManager):
             if end_date > datetime.now():
                 end_date = datetime.now()
             end_date = end_date.strftime("%d %b %Y %H:%M:%S")
-            self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
+            # self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
+            self.logger.info(f"Fetching prices for {ticker_symbol}, key: '{key}' - between {self.datetime} and {end_date}")
             for result in self.binance_client.get_historical_klines(
                 ticker_symbol, timeframe, target_date, end_date, limit=1000
             ):
@@ -61,7 +62,7 @@ class MockBinanceManager(BinanceAPIManager):
 
                 price = float(result[1])
                 cache[f"{ticker_symbol} - {date}"] = price
-            self.logger.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! cache.commit() !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            self.logger.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! cache.commit() !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             cache.commit()
             val = cache.get(key, None)
         return val
