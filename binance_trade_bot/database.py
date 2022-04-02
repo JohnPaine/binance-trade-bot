@@ -42,7 +42,9 @@ class Database:
         """
         session: Session = scoped_session(self.SessionMaker)
         yield session
+        # self.logger.info("!!!!!!!!!!!!!!!!Committing changes to DB!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         session.commit()
+        # self.logger.info("!!!!!!!!!!!!!!!!Closing DB session!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         session.close()
 
     def set_coins(self, symbols: List[str]):
