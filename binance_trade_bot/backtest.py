@@ -13,20 +13,20 @@ from .logger import Logger
 from .models import Coin, Pair
 from .strategies import get_strategy
 
-cache = SqliteDict("data/backtest_cache.db")
-
 
 class MockBinanceManager(BinanceAPIManager):
     def __init__(
-        self,
-        config: Config,
-        db: Database,
-        logger: Logger,
-        start_date: datetime = None,
-        start_balances: Dict[str, float] = None,
+            self,
+            config: Config,
+            db: Database,
+            logger: Logger,
+            start_date: datetime = None,
+            start_balances: Dict[str, float] = None,
+            cache: SqliteDict = None
     ):
         super().__init__(config, db, logger)
         self.config = config
+        self.cache = cache or SqliteDict("data/backtest_cache.db")
         self.datetime = start_date or datetime(2021, 1, 1)
         self.balances = start_balances or {config.BRIDGE.symbol: 100}
 
@@ -45,27 +45,47 @@ class MockBinanceManager(BinanceAPIManager):
         """
         target_date = self.datetime.strftime("%d %b %Y %H:%M:%S")
         key = f"{ticker_symbol} - {target_date}"
-        val = cache.get(key, None)
+        val = self.cache.get(key, None)
+
+        if val == "no price":
+            return val
+
         if val is None:
             end_date = self.datetime + timedelta(minutes=1000)
             if end_date > datetime.now():
                 end_date = datetime.now()
             end_date = end_date.strftime("%d %b %Y %H:%M:%S")
-            # self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
-            self.logger.info(f"Fetching prices for {ticker_symbol}, key: '{key}' - between {self.datetime} and {end_date}")
-            for result in self.binance_client.get_historical_klines(
-                ticker_symbol, timeframe, target_date, end_date, limit=1000
-            ):
-                date = datetime.utcfromtimestamp(result[0] / 1000).strftime("%d %b %Y %H:%M:%S")
 
+            # self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
+
+            self.logger.info(
+                f"Fetching prices for {ticker_symbol}, key: '{key}' - between {self.datetime} and {end_date}")
+            for result in self.binance_client.get_historical_klines(
+                    ticker_symbol, timeframe, target_date, end_date, limit=1000
+            ):
                 # self.logger.log(f"KLines result: {result}")
 
+                date = datetime.utcfromtimestamp(result[0] / 1000).strftime("%d %b %Y %H:%M:%S")
+
                 price = float(result[1])
-                cache[f"{ticker_symbol} - {date}"] = price
-            self.logger.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! cache.commit() !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            cache.commit()
-            val = cache.get(key, None)
+                self.cache[f"{ticker_symbol} - {date}"] = price
+
+                # print(f"key: {key} was successfully fetched")
+            # self.logger.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! cache.commit() !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            self.cache.commit()
+            val = self.cache.get(key, None)
+            # print(f"key: {key}, val: {val}")
+
+            if val is None:
+                self.cache[key] = "no price"
+                val = self.cache.get(key, None)
+
+            # print(f"key: {key}, val: {val}")
+
         return val
+
+    def get_exchange_info(self):
+        return self.binance_client.get_exchange_info()
 
     def get_currency_balance(self, currency_symbol: str, force=False):
         """
@@ -84,7 +104,7 @@ class MockBinanceManager(BinanceAPIManager):
         target_quantity = order_quantity * from_coin_price
         self.balances[target_symbol] -= target_quantity
         self.balances[origin_symbol] = self.balances.get(origin_symbol, 0) + order_quantity * (
-            1 - self.get_fee(origin_coin, target_coin, False)
+                1 - self.get_fee(origin_coin, target_coin, False)
         )
         self.logger.info(
             f"Bought {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
@@ -105,7 +125,7 @@ class MockBinanceManager(BinanceAPIManager):
         order_quantity = self._sell_quantity(origin_symbol, target_symbol, origin_balance)
         target_quantity = order_quantity * from_coin_price
         self.balances[target_symbol] = self.balances.get(target_symbol, 0) + target_quantity * (
-            1 - self.get_fee(origin_coin, target_coin, True)
+                1 - self.get_fee(origin_coin, target_coin, True)
         )
         self.balances[origin_symbol] -= order_quantity
         self.logger.info(
@@ -122,12 +142,12 @@ class MockBinanceManager(BinanceAPIManager):
                 continue
             if coin == self.config.BRIDGE.symbol:
                 price = self.get_ticker_price(target_symbol + coin)
-                if price is None:
+                if price is None or price == "no price":
                     continue
                 total += balance / price
             else:
                 price = self.get_ticker_price(coin + target_symbol)
-                if price is None:
+                if price is None or price == "no price":
                     continue
                 total += price * balance
         return total
@@ -142,13 +162,16 @@ class MockDatabase(Database):
 
 
 def backtest(
-    start_date: datetime = None,
-    end_date: datetime = None,
-    interval=1,
-    yield_interval=100,
-    start_balances: Dict[str, float] = None,
-    starting_coin: str = None,
-    config: Config = None,
+        start_date: datetime = None,
+        end_date: datetime = None,
+        interval=1,
+        yield_interval=100,
+        start_balances: Dict[str, float] = None,
+        starting_coin: str = None,
+        supported_coins=None,
+        logger: Logger = None,
+        cache: SqliteDict = None,
+        config: Config = None,
 ):
     """
 
@@ -159,20 +182,29 @@ def backtest(
     :param yield_interval: After how many intervals should the manager be yielded
     :param start_balances: A dictionary of initial coin values. Default: {BRIDGE: 100}
     :param starting_coin: The coin to start on. Default: first coin in coin list
+    :param supported_coins: List of supported coins
+    :param cache: DB connection client
+    :param logger: Logger to use
 
     :return: The final coin balances
     """
     config = config or Config()
-    logger = Logger("backtesting", enable_notifications=False)
+    logger = logger or Logger("backtesting", enable_notifications=False)
+    cache = cache or SqliteDict("data/backtest_cache.db")
 
     end_date = end_date or datetime.today()
+    supported_coins = supported_coins or config.SUPPORTED_COIN_LIST
 
     db = MockDatabase(logger, config)
     db.create_database()
-    db.set_coins(config.SUPPORTED_COIN_LIST)
-    manager = MockBinanceManager(config, db, logger, start_date, start_balances)
+    db.set_coins(supported_coins)
+    manager = MockBinanceManager(config, db, logger, start_date, start_balances, cache=cache)
 
-    starting_coin = db.get_coin(starting_coin or config.SUPPORTED_COIN_LIST[0])
+    # info = manager.get_exchange_info()
+    # for s in info['symbols']:
+    #     print(s['symbol'])
+
+    starting_coin = db.get_coin(starting_coin or supported_coins[0])
     if manager.get_currency_balance(starting_coin.symbol) == 0:
         manager.buy_alt(starting_coin, config.BRIDGE)
     db.set_current_coin(starting_coin)
@@ -191,6 +223,7 @@ def backtest(
         while manager.datetime < end_date:
             try:
                 trader.scout()
+                trader.print_trade_stats()
             except Exception:  # pylint: disable=broad-except
                 logger.warning(format_exc())
             manager.increment(interval)
@@ -199,5 +232,5 @@ def backtest(
             n += 1
     except KeyboardInterrupt:
         pass
-    cache.close()
+    # cache.close()
     return manager

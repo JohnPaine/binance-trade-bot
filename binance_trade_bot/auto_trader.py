@@ -8,6 +8,18 @@ from .config import Config
 from .database import Database
 from .logger import Logger
 from .models import Coin, CoinValue, Pair
+from dataclasses import dataclass
+
+
+@dataclass
+class TradeStats:
+    dt: datetime
+    from_coin: str
+    to_coin: str
+    from_coin_price: float
+    to_coin_price: float
+    diff_usdt: float
+    diff_perc: float
 
 
 class AutoTrader:
@@ -19,6 +31,9 @@ class AutoTrader:
 
     def initialize(self):
         self.initialize_trade_thresholds()
+
+    def print_trade_stats(self):
+        self.logger.info(f"")
 
     def transaction_through_bridge(self, pair: Pair):
         """
@@ -43,6 +58,9 @@ class AutoTrader:
         if result is not None:
             self.db.set_current_coin(pair.to_coin)
             self.update_trade_threshold(pair.to_coin, result.price)
+            if result.price is None:
+                print(f"result.price is None ---> pair.to_coin: {pair.to_coin}, pair.from_coin: {pair.from_coin}")
+                # self.manager.cache[]
             return result
 
         self.logger.info("Couldn't buy, going back to scouting mode...")
@@ -96,6 +114,11 @@ class AutoTrader:
                     continue
 
                 pair.ratio = from_coin_price / to_coin_price
+                self.logger.info(f"\nInitialized pair threshold:"
+                                 f"\n{pair}"
+                                 f"\nfrom_coin_price:\t{from_coin_price}"
+                                 f"\nto_coin_price:\t{to_coin_price}"
+                                 f"\n")
 
     def scout(self):
         """
@@ -109,6 +132,10 @@ class AutoTrader:
         """
         ratio_dict: Dict[Pair, float] = {}
 
+        if coin_price == "no price":
+            print(f"--->>> SKIP COIN: {coin} ------ NO PRICE!!!!!!!!!!!!!!")
+            return ratio_dict
+
         for pair in self.db.get_pairs_from(coin):
             optional_coin_price = self.manager.get_ticker_price(pair.to_coin + self.config.BRIDGE)
 
@@ -120,8 +147,19 @@ class AutoTrader:
 
             self.db.log_scout(pair, pair.ratio, coin_price, optional_coin_price)
 
+            if isinstance(coin_price, str) or isinstance(optional_coin_price, str):
+                self.logger.warning(f"coin_price - '{coin_price}', optional_coin_price - '{optional_coin_price}'"
+                                    f" ------- wrong price type!!!!")
+                continue
+
             # Obtain (current coin)/(optional coin)
             coin_opt_coin_ratio = coin_price / optional_coin_price
+
+            self.logger.info(f"\npair: {pair}\n"
+                             f"price_1: {coin_price}\n"
+                             f"price_2: {optional_coin_price}\n"
+                             f"ratio: {coin_opt_coin_ratio}\n"
+                             )
 
             # Fees
             from_fee = self.manager.get_fee(pair.from_coin, self.config.BRIDGE, True)
@@ -133,9 +171,20 @@ class AutoTrader:
                     (1 - transaction_fee) * coin_opt_coin_ratio / pair.ratio - 1 - self.config.SCOUT_MARGIN / 100
                 )
             else:
-                ratio_dict[pair] = (
-                    coin_opt_coin_ratio - transaction_fee * self.config.SCOUT_MULTIPLIER * coin_opt_coin_ratio
-                ) - pair.ratio
+                r1 = coin_opt_coin_ratio
+                r2 = transaction_fee * self.config.SCOUT_MULTIPLIER * coin_opt_coin_ratio
+                pr = pair.ratio
+                result = (r1 - r2) - pr
+
+                self.logger.info(f""
+                                 f"\ndt: {self.manager.datetime}"
+                                 f"\nr1: {r1}"
+                                 f"\nr2: {r2}"
+                                 f"\npr: {pr}"
+                                 f"\nresult: {result}\n"
+                                 )
+
+                ratio_dict[pair] = result
         return ratio_dict
 
     def _jump_to_best_coin(self, coin: Coin, coin_price: float):
@@ -144,12 +193,17 @@ class AutoTrader:
         """
         ratio_dict = self._get_ratios(coin, coin_price)
 
+        self.logger.info(f"\nratio_dict: {ratio_dict}\n")
+
         # keep only ratios bigger than zero
         ratio_dict = {k: v for k, v in ratio_dict.items() if v > 0}
 
         # if we have any viable options, pick the one with the biggest ratio
         if ratio_dict:
             best_pair = max(ratio_dict, key=ratio_dict.get)
+
+            self.logger.info(f"best_pair: {best_pair}")
+
             self.logger.info(f"Will be jumping from {coin} to {best_pair.to_coin_id}")
             self.transaction_through_bridge(best_pair)
 
