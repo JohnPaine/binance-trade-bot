@@ -28,6 +28,7 @@ class AutoTrader:
         self.db = database
         self.logger = logger
         self.config = config
+        self.stats = []
 
     def initialize(self):
         self.initialize_trade_thresholds()
@@ -43,6 +44,9 @@ class AutoTrader:
         balance = self.manager.get_currency_balance(pair.from_coin.symbol)
         from_coin_price = self.manager.get_ticker_price(pair.from_coin + self.config.BRIDGE)
 
+        to_coin_price = self.manager.get_ticker_price(pair.to_coin + self.config.BRIDGE)
+
+        s = TradeStats(self.manager.datetime, pair.from_coin.symbol, pair.to_coin.symbol, from_coin_price, to_coin_price, 0, 0)
         if balance and balance * from_coin_price > self.manager.get_min_notional(
             pair.from_coin.symbol, self.config.BRIDGE.symbol
         ):
@@ -53,6 +57,8 @@ class AutoTrader:
         if can_sell and self.manager.sell_alt(pair.from_coin, self.config.BRIDGE) is None:
             self.logger.info("Couldn't sell, going back to scouting mode...")
             return None
+        else:
+
 
         result = self.manager.buy_alt(pair.to_coin, self.config.BRIDGE)
         if result is not None:
