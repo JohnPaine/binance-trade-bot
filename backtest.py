@@ -10,9 +10,9 @@ cache = SqliteDict("data/backtest_cache.db")
 
 logger = Logger("backtesting", enable_notifications=False)
 
-# all_coins = ["DOT", "ADA"]
+all_coins = ["DOT", "ADA"]
 # all_coins = ["DOT", "ADA", "MATIC", "FTM", "TRX"]
-all_coins = ["ETH", "BNB", "ETC", "XLM", "ADA", "DOT", "MATIC", "FTM", "TRX"]
+# all_coins = ["ETH", "BNB", "ETC", "XLM", "ADA", "DOT", "MATIC", "FTM", "TRX"]
 # all_coins = ["ETH", "BNB", "ETC"]
 # all_coins = ["ETH", "BNB", "ETC", "XLM"]
 
@@ -64,7 +64,8 @@ def main():
 
     stats = SortedDict()
     # test_data = gen_test_data([4, 6, 8])
-    test_data = gen_test_data([2, 3, 4, 5, 6])
+    # test_data = gen_test_data([2, 3, 4, 5, 6])
+    test_data = gen_test_data([2])
     size = len(test_data)
 
     logger.info(f"\n======================== Starting back-test on {size} coins combinations: ========================")

@@ -34,7 +34,12 @@ class AutoTrader:
         self.initialize_trade_thresholds()
 
     def print_trade_stats(self):
-        self.logger.info(f"")
+        msg = "Trade stats:\n"
+        for s in self.stats:
+            m = f"{s.dt}, {s.from_coin}->{s.to_coin} [{round(s.from_coin_price, 3)}->{round(s.to_coin_price, 3)}], " \
+                f"{round(s.diff_usdt, 3)}, {round(s.diff_perc, 3)}%\n"
+            msg += m
+        self.logger.info(msg)
 
     def transaction_through_bridge(self, pair: Pair):
         """
@@ -46,7 +51,8 @@ class AutoTrader:
 
         to_coin_price = self.manager.get_ticker_price(pair.to_coin + self.config.BRIDGE)
 
-        s = TradeStats(self.manager.datetime, pair.from_coin.symbol, pair.to_coin.symbol, from_coin_price, to_coin_price, 0, 0)
+        s = TradeStats(self.manager.datetime, pair.from_coin.symbol, pair.to_coin.symbol, from_coin_price,
+                       to_coin_price, 0, 0)
         if balance and balance * from_coin_price > self.manager.get_min_notional(
             pair.from_coin.symbol, self.config.BRIDGE.symbol
         ):
@@ -54,11 +60,18 @@ class AutoTrader:
         else:
             self.logger.info("Skipping sell")
 
-        if can_sell and self.manager.sell_alt(pair.from_coin, self.config.BRIDGE) is None:
-            self.logger.info("Couldn't sell, going back to scouting mode...")
-            return None
-        else:
-
+        if can_sell:
+            trade = self.manager.sell_alt(pair.from_coin, self.config.BRIDGE)
+            print(f"{trade}\n")
+            if trade is None:
+                self.logger.info("Couldn't sell, going back to scouting mode...")
+                return None
+            else:
+                if len(self.stats) > 0:
+                    last_trade = self.stats[-1]
+                    s.diff_usdt = (trade.price - last_trade.to_coin_price) * trade.cumulative_quote_qty
+                    s.diff_perc = s.diff_usdt / self.manager.balances["USDT"] * 100.0
+                self.stats.append(s)
 
         result = self.manager.buy_alt(pair.to_coin, self.config.BRIDGE)
         if result is not None:
@@ -161,11 +174,11 @@ class AutoTrader:
             # Obtain (current coin)/(optional coin)
             coin_opt_coin_ratio = coin_price / optional_coin_price
 
-            self.logger.info(f"\npair: {pair}\n"
-                             f"price_1: {coin_price}\n"
-                             f"price_2: {optional_coin_price}\n"
-                             f"ratio: {coin_opt_coin_ratio}\n"
-                             )
+            # self.logger.info(f"\npair: {pair}\n"
+            #                  f"price_1: {coin_price}\n"
+            #                  f"price_2: {optional_coin_price}\n"
+            #                  f"ratio: {coin_opt_coin_ratio}\n"
+            #                  )
 
             # Fees
             from_fee = self.manager.get_fee(pair.from_coin, self.config.BRIDGE, True)
@@ -182,13 +195,13 @@ class AutoTrader:
                 pr = pair.ratio
                 result = (r1 - r2) - pr
 
-                self.logger.info(f""
-                                 f"\ndt: {self.manager.datetime}"
-                                 f"\nr1: {r1}"
-                                 f"\nr2: {r2}"
-                                 f"\npr: {pr}"
-                                 f"\nresult: {result}\n"
-                                 )
+                # self.logger.info(f""
+                #                  f"\ndt: {self.manager.datetime}"
+                #                  f"\nr1: {r1}"
+                #                  f"\nr2: {r2}"
+                #                  f"\npr: {pr}"
+                #                  f"\nresult: {result}\n"
+                #                  )
 
                 ratio_dict[pair] = result
         return ratio_dict
@@ -199,7 +212,7 @@ class AutoTrader:
         """
         ratio_dict = self._get_ratios(coin, coin_price)
 
-        self.logger.info(f"\nratio_dict: {ratio_dict}\n")
+        # self.logger.info(f"\nratio_dict: {ratio_dict}\n")
 
         # keep only ratios bigger than zero
         ratio_dict = {k: v for k, v in ratio_dict.items() if v > 0}

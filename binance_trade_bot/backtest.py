@@ -223,11 +223,11 @@ def backtest(
         while manager.datetime < end_date:
             try:
                 trader.scout()
-                trader.print_trade_stats()
             except Exception:  # pylint: disable=broad-except
                 logger.warning(format_exc())
             manager.increment(interval)
             if n % yield_interval == 0:
+                trader.print_trade_stats()
                 yield manager
             n += 1
     except KeyboardInterrupt:
