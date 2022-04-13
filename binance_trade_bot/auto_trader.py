@@ -14,12 +14,15 @@ from dataclasses import dataclass
 @dataclass
 class TradeStats:
     dt: datetime
-    from_coin: str
-    to_coin: str
-    from_coin_price: float
-    to_coin_price: float
-    diff_usdt: float
-    diff_perc: float
+    from_coin: str = ""
+    to_coin: str = ""
+    from_coin_price: float = 0
+    to_coin_price: float = 0
+    diff_usdt: float = 0
+    diff_perc: float = 0
+    quantity: float = 0
+    balance: str = ""
+    perc_from_init_balance: float = 0
 
 
 class AutoTrader:
@@ -36,8 +39,9 @@ class AutoTrader:
     def print_trade_stats(self):
         msg = "Trade stats:\n"
         for s in self.stats:
-            m = f"{s.dt}, {s.from_coin}->{s.to_coin} [{round(s.from_coin_price, 3)}->{round(s.to_coin_price, 3)}], " \
-                f"{round(s.diff_usdt, 3)}, {round(s.diff_perc, 3)}%\n"
+            m = f"{s.dt}, {s.from_coin}->{s.to_coin} [{round(s.from_coin_price, 3)}->{round(s.to_coin_price, 3)}] * " \
+                f"{s.quantity}, {round(s.diff_usdt, 3)}, {round(s.diff_perc, 3)}%, " \
+                f"b: {s.balance}, result: {s.perc_from_init_balance}%\n"
             msg += m
         self.logger.info(msg)
 
@@ -48,11 +52,10 @@ class AutoTrader:
         can_sell = False
         balance = self.manager.get_currency_balance(pair.from_coin.symbol)
         from_coin_price = self.manager.get_ticker_price(pair.from_coin + self.config.BRIDGE)
-
         to_coin_price = self.manager.get_ticker_price(pair.to_coin + self.config.BRIDGE)
 
-        s = TradeStats(self.manager.datetime, pair.from_coin.symbol, pair.to_coin.symbol, from_coin_price,
-                       to_coin_price, 0, 0)
+        s = TradeStats(self.manager.datetime, pair.from_coin.symbol, pair.to_coin.symbol,
+                       from_coin_price, to_coin_price)
         if balance and balance * from_coin_price > self.manager.get_min_notional(
             pair.from_coin.symbol, self.config.BRIDGE.symbol
         ):
@@ -69,9 +72,15 @@ class AutoTrader:
             else:
                 if len(self.stats) > 0:
                     last_trade = self.stats[-1]
-                    s.diff_usdt = (trade.price - last_trade.to_coin_price) * trade.cumulative_quote_qty
+                    s.quantity = trade["quantity"]
+                    s.diff_usdt = (trade["price"] - last_trade.to_coin_price) * s.quantity
                     s.diff_perc = s.diff_usdt / self.manager.balances["USDT"] * 100.0
+                    s.balance = f"{round(balance, 3)} {pair.to_coin.symbol}"
+                    bridge_value = self.manager.collate_coins(self.manager.config.BRIDGE.symbol)
+                    init_balance = self.manager.init_balance["USDT"]
+                    s.perc_from_init_balance = round((bridge_value - init_balance) / init_balance * 100, 3)
                 self.stats.append(s)
+                self.print_trade_stats()
 
         result = self.manager.buy_alt(pair.to_coin, self.config.BRIDGE)
         if result is not None:

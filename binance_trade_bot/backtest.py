@@ -29,6 +29,7 @@ class MockBinanceManager(BinanceAPIManager):
         self.cache = cache or SqliteDict("data/backtest_cache.db")
         self.datetime = start_date or datetime(2021, 1, 1)
         self.balances = start_balances or {config.BRIDGE.symbol: 100}
+        self.init_balance = self.balances
 
     def setup_websockets(self):
         pass  # No websockets are needed for backtesting
@@ -132,7 +133,7 @@ class MockBinanceManager(BinanceAPIManager):
             f"Sold {origin_symbol}, balance now: {self.balances[origin_symbol]} - bridge: "
             f"{self.balances[target_symbol]}"
         )
-        return {"price": from_coin_price}
+        return {"price": from_coin_price, "quantity": order_quantity}
 
     def collate_coins(self, target_symbol: str):
         total = 0
