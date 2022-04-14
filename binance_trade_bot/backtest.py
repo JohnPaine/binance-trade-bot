@@ -29,7 +29,8 @@ class MockBinanceManager(BinanceAPIManager):
         self.cache = cache or SqliteDict("data/backtest_cache.db")
         self.datetime = start_date or datetime(2021, 1, 1)
         self.balances = start_balances or {config.BRIDGE.symbol: 100}
-        self.init_balance = self.balances
+        print(f"\n\nself.balances: {self.balances}\n\n")
+        self.init_balance = self.balances.copy()
 
     def setup_websockets(self):
         pass  # No websockets are needed for backtesting
@@ -172,6 +173,7 @@ def backtest(
         supported_coins=None,
         logger: Logger = None,
         cache: SqliteDict = None,
+        scout_multiplier: float = None,
         config: Config = None,
 ):
     """
@@ -185,6 +187,7 @@ def backtest(
     :param starting_coin: The coin to start on. Default: first coin in coin list
     :param supported_coins: List of supported coins
     :param cache: DB connection client
+    :param scout_multiplier: optional scout multiplier to override config data
     :param logger: Logger to use
 
     :return: The final coin balances
@@ -192,6 +195,10 @@ def backtest(
     config = config or Config()
     logger = logger or Logger("backtesting", enable_notifications=False)
     cache = cache or SqliteDict("data/backtest_cache.db")
+    if scout_multiplier:
+        config.SCOUT_MULTIPLIER = scout_multiplier
+
+    logger.warning(f"\n\n--->>>> STARTING BACK-TESTING FOR SCOUT_MULTIPLIER: {config.SCOUT_MULTIPLIER}\n\n")
 
     end_date = end_date or datetime.today()
     supported_coins = supported_coins or config.SUPPORTED_COIN_LIST
@@ -228,10 +235,13 @@ def backtest(
                 logger.warning(format_exc())
             manager.increment(interval)
             if n % yield_interval == 0:
-                trader.print_trade_stats()
+                # trader.print_trade_stats()
                 yield manager
             n += 1
     except KeyboardInterrupt:
         pass
     # cache.close()
+
+    logger.warning(f"\n\n<<<--- STOP BACK-TESTING FOR SCOUT_MULTIPLIER: {config.SCOUT_MULTIPLIER}\n\n")
+
     return manager

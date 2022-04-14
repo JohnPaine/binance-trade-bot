@@ -5,12 +5,16 @@ from sqlitedict import SqliteDict
 from sortedcontainers import SortedDict
 from dataclasses import dataclass
 import itertools
+import numpy as np
+
 
 cache = SqliteDict("data/backtest_cache.db")
 
-logger = Logger("backtesting", enable_notifications=False)
+logger = Logger("backtesting", enable_notifications=True)
 
-all_coins = ["DOT", "ADA"]
+
+all_coins = ["DOT", "ADA", "MATIC", "FTM"]
+# all_coins = ["DOT", "ADA"]
 # all_coins = ["DOT", "ADA", "MATIC", "FTM", "TRX"]
 # all_coins = ["ETH", "BNB", "ETC", "XLM", "ADA", "DOT", "MATIC", "FTM", "TRX"]
 # all_coins = ["ETH", "BNB", "ETC"]
@@ -23,6 +27,9 @@ all_coins = ["DOT", "ADA"]
 dt1 = datetime(2022, 1, 1)
 dt2 = datetime(2022, 4, 1)
 balance = 100
+m1 = 1.1
+m2 = 12
+ms = 0.45
 
 
 @dataclass
@@ -31,6 +38,7 @@ class ShallowTestStats:
     usdt_diff: float
     btc_val: float
     btc_diff: float
+    multiplier: float
     coin_list: [str]
 
 
@@ -41,7 +49,8 @@ def gen_test_data(comb_sizes=None):
     for size in comb_sizes:
         coin_list = [p for p in itertools.combinations(all_coins, size)]
         for coin_pair in coin_list:
-            d.append({"coins": coin_pair, "DT1": dt1, "DT2": dt2, "usdt": balance})
+            for multiplier in np.arange(m1, m2, ms):
+                d.append({"coins": coin_pair, "DT1": dt1, "DT2": dt2, "usdt": balance, "multiplier": multiplier})
     return d
 
 
@@ -53,9 +62,8 @@ def print_stats(stats, list_num, list_size):
         logger.info(f"\n--------------------------->>> Tests results [{list_num}/{list_size}]:")
 
     for s in stats.values():
-        rounded = round(s.usdt_val, 2)
-        logger.info(f"{i}. {rounded}$: [coins: {s.coin_list}, usd_diff: {s.usdt_diff}%, btc_val: {s.btc_val}, "
-                    f"btc_diff: {s.btc_diff}%]")
+        logger.info(f"{i}. {round(s.usdt_val, 2)}$: [coins: {s.coin_list}, usd_diff: {s.usdt_diff}%, "
+                    f"btc_val: {round(s.btc_val, 5)}, btc_diff: {s.btc_diff}%, multiplier: {round(s.multiplier, 2)}]")
         i -= 1
 
 
@@ -65,26 +73,27 @@ def main():
     stats = SortedDict()
     # test_data = gen_test_data([4, 6, 8])
     # test_data = gen_test_data([2, 3, 4, 5, 6])
-    test_data = gen_test_data([2])
+    test_data = gen_test_data([3, 4])
     size = len(test_data)
 
     logger.info(f"\n======================== Starting back-test on {size} coins combinations: ========================")
     for d in test_data:
-        logger.info(d["coins"])
+        logger.info(f"coins: {d['coins']}, multiplier: {round(d['multiplier'], 2)}")
 
     i = 0
     for data in test_data:
         logger.info(f"\n    >>>--->>> Start back-testing on data [{i + 1}/{size}]: {data}")
         data_stats = []
         for manager in backtest(data["DT1"], data["DT2"], start_balances={"USDT": data["usdt"]},
-                                supported_coins=data["coins"], logger=logger, cache=cache):
+                                supported_coins=data["coins"], logger=logger, scout_multiplier=data["multiplier"],
+                                cache=cache):
             btc_value = manager.collate_coins("BTC")
             bridge_value = manager.collate_coins(manager.config.BRIDGE.symbol)
             history.append((btc_value, bridge_value))
             btc_diff = round((btc_value - history[0][0]) / history[0][0] * 100, 3)
             bridge_diff = round((bridge_value - history[0][1]) / history[0][1] * 100, 3)
 
-            data_stats = [bridge_value, bridge_diff, btc_value, btc_diff]
+            data_stats = [bridge_value, bridge_diff, btc_value, btc_diff, data["multiplier"]]
 
             print("------")
             print("TIME:", manager.datetime)

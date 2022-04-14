@@ -37,13 +37,14 @@ class AutoTrader:
         self.initialize_trade_thresholds()
 
     def print_trade_stats(self):
-        msg = "Trade stats:\n"
+        msg = "\n\nTrade stats:\n"
         for s in self.stats:
             m = f"{s.dt}, {s.from_coin}->{s.to_coin} [{round(s.from_coin_price, 3)}->{round(s.to_coin_price, 3)}] * " \
                 f"{s.quantity}, {round(s.diff_usdt, 3)}, {round(s.diff_perc, 3)}%, " \
-                f"b: {s.balance}, result: {s.perc_from_init_balance}%\n"
+                f"balance: {s.balance}, result: {s.perc_from_init_balance}% from init balance: " \
+                f"{self.manager.init_balance}\n"
             msg += m
-        self.logger.info(msg)
+        self.logger.warning(msg)
 
     def transaction_through_bridge(self, pair: Pair):
         """
@@ -78,6 +79,7 @@ class AutoTrader:
                     s.balance = f"{round(balance, 3)} {pair.to_coin.symbol}"
                     bridge_value = self.manager.collate_coins(self.manager.config.BRIDGE.symbol)
                     init_balance = self.manager.init_balance["USDT"]
+                    print(f"init_balance = {init_balance}")
                     s.perc_from_init_balance = round((bridge_value - init_balance) / init_balance * 100, 3)
                 self.stats.append(s)
                 self.print_trade_stats()
