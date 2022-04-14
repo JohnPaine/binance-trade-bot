@@ -32,6 +32,11 @@ class AutoTrader:
         self.logger = logger
         self.config = config
         self.stats = []
+        self.worst_profit = 0
+        self.worst_trade = None
+        self.best_profit = 0
+        self.best_trade = None
+        self.average_profit = 0
 
     def initialize(self):
         self.initialize_trade_thresholds()
@@ -81,6 +86,18 @@ class AutoTrader:
                     init_balance = self.manager.init_balance["USDT"]
                     print(f"init_balance = {init_balance}")
                     s.perc_from_init_balance = round((bridge_value - init_balance) / init_balance * 100, 3)
+
+                    if self.worst_profit > s.diff_usdt:
+                        self.worst_profit = s.diff_usdt
+                        self.worst_trade = s
+                    if self.best_profit < s.diff_usdt:
+                        self.best_profit = s.diff_usdt
+                        self.best_trade = s
+                    stats_len = len(self.stats)
+                    if stats_len > 1:
+                        self.average_profit *= stats_len
+                        self.average_profit += s.diff_usdt
+                        self.average_profit /= (stats_len + 1)
                 self.stats.append(s)
                 self.print_trade_stats()
 

@@ -102,11 +102,19 @@ def main():
             print(f"{manager.config.BRIDGE.symbol} VALUE:", bridge_value, f"({bridge_diff}%)")
             print("------")
 
+            logger.warning(f"\nSUMMARY STATS:\n"
+                           f"worst_profit: {manager.worst_profit},\n"
+                           f"worst_trade: {manager.worst_trade},\n"
+                           f"best_profit: {manager.best_profit},\n"
+                           f"best_trade: {manager.best_trade},\n"
+                           f"average_profit: {manager.average_profit}\n")
+
         if data_stats:
             key = data_stats[0]
             while stats.__contains__(key):
                 key += 1e-12
             stats[key] = ShallowTestStats(*data_stats, data["coins"])
+
 
         print_stats(stats, i, size)
         cache.commit()
