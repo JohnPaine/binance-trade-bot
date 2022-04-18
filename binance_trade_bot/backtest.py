@@ -224,7 +224,7 @@ def backtest(
     trader = strategy(manager, db, logger, config)
     trader.initialize()
 
-    yield manager
+    yield manager, trader
 
     n = 1
     try:
@@ -236,12 +236,13 @@ def backtest(
             manager.increment(interval)
             if n % yield_interval == 0:
                 # trader.print_trade_stats()
-                yield manager
+                yield manager, trader
             n += 1
     except KeyboardInterrupt:
         pass
+
     # cache.close()
 
     logger.warning(f"\n\n<<<--- STOP BACK-TESTING FOR SCOUT_MULTIPLIER: {config.SCOUT_MULTIPLIER}\n\n")
 
-    return manager
+    return manager, trader

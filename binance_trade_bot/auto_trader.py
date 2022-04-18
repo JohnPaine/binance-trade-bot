@@ -9,20 +9,40 @@ from .database import Database
 from .logger import Logger
 from .models import Coin, CoinValue, Pair
 from dataclasses import dataclass
+from sortedcontainers import SortedDict
+import sys
 
 
 @dataclass
 class TradeStats:
+    trade_idx: int
     dt: datetime
     from_coin: str = ""
     to_coin: str = ""
     from_coin_price: float = 0
     to_coin_price: float = 0
+    prev_trade: str = ""
+    trades_str: str = ""
     diff_usdt: float = 0
     diff_perc: float = 0
     quantity: float = 0
     balance: str = ""
     perc_from_init_balance: float = 0
+    manager: BinanceAPIManager = None
+    multiplier: float = 0
+
+    def __str__(self):
+        # m = f"x{self.multiplier}, {self.dt.strftime('%d/%m/%Y, %H:%M:%S')}, {self.from_coin}->{self.to_coin} " \
+        #     f"[{self.from_coin_price}*{self.quantity} -> {self.to_coin_price}], " \
+        #     f"prev_trade: {self.prev_trade}, " \
+        #     f"profit: ${self.diff_usdt} ({self.diff_perc}%), " \
+        #     f"balance: {self.balance}, result: {self.perc_from_init_balance}% from init balance: " \
+        #     f"{self.manager.init_balance}\n"
+        m = f"{self.trade_idx}. x{self.multiplier}, {self.dt.strftime('%d/%m/%Y, %H:%M:%S')}, {self.trades_str}, " \
+            f"PNL: ${self.diff_usdt} ({self.diff_perc}%), " \
+            f"result: {self.perc_from_init_balance}% from init balance - " \
+            f"{self.manager.init_balance['USDT']}$"
+        return m
 
 
 class AutoTrader:
@@ -31,24 +51,21 @@ class AutoTrader:
         self.db = database
         self.logger = logger
         self.config = config
-        self.stats = []
-        self.worst_profit = 0
+        self.stats = SortedDict()
+        self.worst_profit = sys.maxsize
         self.worst_trade = None
-        self.best_profit = 0
+        self.best_profit = -sys.maxsize
         self.best_trade = None
         self.average_profit = 0
+        self.last_trade_stats = None
 
     def initialize(self):
         self.initialize_trade_thresholds()
 
     def print_trade_stats(self):
         msg = "\n\nTrade stats:\n"
-        for s in self.stats:
-            m = f"{s.dt}, {s.from_coin}->{s.to_coin} [{round(s.from_coin_price, 3)}->{round(s.to_coin_price, 3)}] * " \
-                f"{s.quantity}, {round(s.diff_usdt, 3)}, {round(s.diff_perc, 3)}%, " \
-                f"balance: {s.balance}, result: {s.perc_from_init_balance}% from init balance: " \
-                f"{self.manager.init_balance}\n"
-            msg += m
+        for s in self.stats.values():
+            msg += f"{str(s)}\n"
         self.logger.warning(msg)
 
     def transaction_through_bridge(self, pair: Pair):
@@ -60,8 +77,10 @@ class AutoTrader:
         from_coin_price = self.manager.get_ticker_price(pair.from_coin + self.config.BRIDGE)
         to_coin_price = self.manager.get_ticker_price(pair.to_coin + self.config.BRIDGE)
 
-        s = TradeStats(self.manager.datetime, pair.from_coin.symbol, pair.to_coin.symbol,
-                       from_coin_price, to_coin_price)
+        s = TradeStats(len(self.stats), self.manager.datetime, pair.from_coin.symbol, pair.to_coin.symbol,
+                       from_coin_price, to_coin_price, manager=self.manager,
+                       multiplier=round(self.manager.config.SCOUT_MULTIPLIER, 2))
+        diff_usdt = 0
         if balance and balance * from_coin_price > self.manager.get_min_notional(
             pair.from_coin.symbol, self.config.BRIDGE.symbol
         ):
@@ -71,34 +90,50 @@ class AutoTrader:
 
         if can_sell:
             trade = self.manager.sell_alt(pair.from_coin, self.config.BRIDGE)
-            print(f"{trade}\n")
+            # print(f"{trade}\n")
             if trade is None:
                 self.logger.info("Couldn't sell, going back to scouting mode...")
                 return None
             else:
-                if len(self.stats) > 0:
-                    last_trade = self.stats[-1]
+                if self.last_trade_stats:
+                    prev = self.last_trade_stats
                     s.quantity = trade["quantity"]
-                    s.diff_usdt = (trade["price"] - last_trade.to_coin_price) * s.quantity
-                    s.diff_perc = s.diff_usdt / self.manager.balances["USDT"] * 100.0
-                    s.balance = f"{round(balance, 3)} {pair.to_coin.symbol}"
-                    bridge_value = self.manager.collate_coins(self.manager.config.BRIDGE.symbol)
+                    sum1 = round(prev.from_coin_price * prev.quantity, 2)
+                    sum2 = round(prev.to_coin_price * s.quantity, 2)
+                    sum3 = round(s.from_coin_price * s.quantity, 2)
+                    q4 = round(sum3 / s.to_coin_price, 3)
+                    sum4 = round(q4 * s.to_coin_price, 2)
+                    s.trades_str = f"{prev.from_coin} [{prev.from_coin_price}*{prev.quantity}={sum1}$] -> " \
+                                   f"{prev.to_coin} [{prev.to_coin_price}*{s.quantity}={sum2}$] -> " \
+                                   f"{s.from_coin} [{s.from_coin_price}*{s.quantity}={sum3}$] -> " \
+                                   f"{s.to_coin} [{s.to_coin_price}*{q4}={sum4}$]"
+                    # s.prev_trade = f"{prev.from_coin} -> {prev.to_coin} " \
+                    #                f"[{prev.from_coin_price}*{prev.quantity}->" \
+                    #                f"{prev.to_coin_price}*{s.quantity}]"
+                    diff_usdt = s.diff_usdt = round((trade["price"] - prev.to_coin_price) * s.quantity, 3)
                     init_balance = self.manager.init_balance["USDT"]
-                    print(f"init_balance = {init_balance}")
-                    s.perc_from_init_balance = round((bridge_value - init_balance) / init_balance * 100, 3)
+                    s.diff_perc = round(s.diff_usdt / init_balance * 100.0, 3)
+                    s.balance = f"{round(balance, 3)} {pair.to_coin.symbol}"
+                    # bridge_value = self.manager.collate_coins(self.manager.config.BRIDGE.symbol)
+                    s.perc_from_init_balance = round((sum3 - init_balance) / init_balance * 100, 3)
 
-                    if self.worst_profit > s.diff_usdt:
-                        self.worst_profit = s.diff_usdt
+                    if self.worst_profit > diff_usdt:
+                        self.worst_profit = diff_usdt
                         self.worst_trade = s
-                    if self.best_profit < s.diff_usdt:
-                        self.best_profit = s.diff_usdt
+                    if self.best_profit < diff_usdt:
+                        self.best_profit = diff_usdt
                         self.best_trade = s
                     stats_len = len(self.stats)
                     if stats_len > 1:
                         self.average_profit *= stats_len
-                        self.average_profit += s.diff_usdt
+                        self.average_profit += diff_usdt
                         self.average_profit /= (stats_len + 1)
-                self.stats.append(s)
+                        self.average_profit = round(self.average_profit, 3)
+
+                while self.stats.__contains__(diff_usdt):
+                    diff_usdt += 1e-12
+                self.stats[diff_usdt] = s
+                self.last_trade_stats = s
                 self.print_trade_stats()
 
         result = self.manager.buy_alt(pair.to_coin, self.config.BRIDGE)
@@ -107,7 +142,12 @@ class AutoTrader:
             self.update_trade_threshold(pair.to_coin, result.price)
             if result.price is None:
                 print(f"result.price is None ---> pair.to_coin: {pair.to_coin}, pair.from_coin: {pair.from_coin}")
-                # self.manager.cache[]
+            # elif self.last_trade_stats:
+            #     last_trade = self.last_trade_stats
+            #     s.trades_str = f"{last_trade.from_coin} [{last_trade.from_coin_price}*{last_trade.quantity}] -> " \
+            #                    f"{last_trade.to_coin} [{last_trade.to_coin_price}*{s.quantity}] -> " \
+            #                    f"{s.from_coin} [{s.from_coin_price}*{s.quantity}] -> " \
+            #                    f"{s.to_coin} [{result.price} * {result.cumulative_quote_qty}]"
             return result
 
         self.logger.info("Couldn't buy, going back to scouting mode...")
@@ -144,7 +184,8 @@ class AutoTrader:
             for pair in session.query(Pair).filter(Pair.ratio.is_(None)).all():
                 if not pair.from_coin.enabled or not pair.to_coin.enabled:
                     continue
-                self.logger.info(f"Initializing {pair.from_coin} vs {pair.to_coin}")
+
+                # self.logger.info(f"Initializing {pair.from_coin} vs {pair.to_coin}")
 
                 from_coin_price = self.manager.get_ticker_price(pair.from_coin + self.config.BRIDGE)
                 if from_coin_price is None:
@@ -161,11 +202,11 @@ class AutoTrader:
                     continue
 
                 pair.ratio = from_coin_price / to_coin_price
-                self.logger.info(f"\nInitialized pair threshold:"
-                                 f"\n{pair}"
-                                 f"\nfrom_coin_price:\t{from_coin_price}"
-                                 f"\nto_coin_price:\t{to_coin_price}"
-                                 f"\n")
+                # self.logger.info(f"\nInitialized pair threshold:"
+                #                  f"\n{pair}"
+                #                  f"\nfrom_coin_price:\t{from_coin_price}"
+                #                  f"\nto_coin_price:\t{to_coin_price}"
+                #                  f"\n")
 
     def scout(self):
         """
@@ -180,7 +221,7 @@ class AutoTrader:
         ratio_dict: Dict[Pair, float] = {}
 
         if coin_price == "no price":
-            print(f"--->>> SKIP COIN: {coin} ------ NO PRICE!!!!!!!!!!!!!!")
+            print(f"\n\tWARNING:       ------>>> SKIP COIN: {coin} <<<------ \n\t!!!!!!!!!!! NO PRICE !!!!!!!!!!!!\n\n")
             return ratio_dict
 
         for pair in self.db.get_pairs_from(coin):
@@ -195,18 +236,13 @@ class AutoTrader:
             self.db.log_scout(pair, pair.ratio, coin_price, optional_coin_price)
 
             if isinstance(coin_price, str) or isinstance(optional_coin_price, str):
-                self.logger.warning(f"coin_price - '{coin_price}', optional_coin_price - '{optional_coin_price}'"
-                                    f" ------- wrong price type!!!!")
+                self.logger.warning(f"\n\n\t\t\t\t!!!!!!!!!!! ERROR !!!!!!!!!!!!!\n\n\t\tcoin_price - '{coin_price}', "
+                                    f"optional_coin_price - '{optional_coin_price}'"
+                                    f"\n\t\t\t/\\/\\/\\!!!!!!!!!<<<------- WRONG PRICE TYPES --------->>>!!!!!!!!!\n\n")
                 continue
 
             # Obtain (current coin)/(optional coin)
-            coin_opt_coin_ratio = coin_price / optional_coin_price
-
-            # self.logger.info(f"\npair: {pair}\n"
-            #                  f"price_1: {coin_price}\n"
-            #                  f"price_2: {optional_coin_price}\n"
-            #                  f"ratio: {coin_opt_coin_ratio}\n"
-            #                  )
+            optional_coin_ratio = coin_price / optional_coin_price
 
             # Fees
             from_fee = self.manager.get_fee(pair.from_coin, self.config.BRIDGE, True)
@@ -214,24 +250,19 @@ class AutoTrader:
             transaction_fee = from_fee + to_fee - from_fee * to_fee
 
             if self.config.USE_MARGIN == "yes":
-                ratio_dict[pair] = (
-                    (1 - transaction_fee) * coin_opt_coin_ratio / pair.ratio - 1 - self.config.SCOUT_MARGIN / 100
-                )
+                mult = self.config.SCOUT_MARGIN
+                result = optional_coin_ratio / pair.ratio * (1 - transaction_fee) - 1 - mult / 100
             else:
-                r1 = coin_opt_coin_ratio
-                r2 = transaction_fee * self.config.SCOUT_MULTIPLIER * coin_opt_coin_ratio
-                pr = pair.ratio
-                result = (r1 - r2) - pr
+                mult = self.config.SCOUT_MULTIPLIER
+                result = optional_coin_ratio * (1 - transaction_fee * mult) - pair.ratio
 
-                # self.logger.info(f""
-                #                  f"\ndt: {self.manager.datetime}"
-                #                  f"\nr1: {r1}"
-                #                  f"\nr2: {r2}"
-                #                  f"\npr: {pr}"
-                #                  f"\nresult: {result}\n"
-                #                  )
-
-                ratio_dict[pair] = result
+            ratio_dict[pair] = result
+            # self.logger.info(f"\nCalculated ratio for pair: {pair}\n"
+            #                  f"coin_price:\t\t\t{coin_price}\n"
+            #                  f"optional_coin_price:\t{optional_coin_price}\n"
+            #                  f"optional_coin_ratio:\t{optional_coin_ratio}\n"
+            #                  f"calc_coin_ratio:\t\t{result}\n"
+            #                  )
         return ratio_dict
 
     def _jump_to_best_coin(self, coin: Coin, coin_price: float):
