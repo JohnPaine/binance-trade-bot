@@ -336,8 +336,7 @@ class BinanceAPIManager:
                 symbol=origin_symbol + target_symbol, quantity=(order_quantity_s), price=from_coin_price_s
             )
 
-        self.logger.info("order")
-        self.logger.info(order)
+        self.logger.info(f"order: {order}")
 
         trade_log.set_ordered(origin_balance, target_balance, order_quantity)
 

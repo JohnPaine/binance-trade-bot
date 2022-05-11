@@ -1,6 +1,34 @@
+import logging
 import logging.handlers
 
 from .notifications import NotificationHandler
+
+
+class CustomFormatter(logging.Formatter):
+
+    def __init__(self, fmt=""):
+        super().__init__(fmt)
+
+    grey = "\x1b[38;20m"
+    yellow = "\x1b[33;20m"
+    red = "\x1b[31;20m"
+    bold_red = "\x1b[31;1m"
+    reset = "\x1b[0m"
+    format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
+
+    FORMATS = {
+        logging.DEBUG: grey + format + reset,
+        logging.INFO: grey + format + reset,
+        logging.WARNING: yellow + format + reset,
+        logging.ERROR: red + format + reset,
+        logging.CRITICAL: bold_red + format + reset
+    }
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt)
+        # formatter = logging.Formatter(self._fmt)
+        return formatter.format(record)
 
 
 class Logger:
@@ -13,7 +41,8 @@ class Logger:
         self.Logger = logging.getLogger(f"{logging_service}_logger")
         self.Logger.setLevel(logging.DEBUG)
         self.Logger.propagate = False
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        # formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        formatter = CustomFormatter()
         # default is "logs/crypto_trading.log"
         fh = logging.FileHandler(f"logs/{logging_service}.log")
         fh.setLevel(logging.DEBUG)
