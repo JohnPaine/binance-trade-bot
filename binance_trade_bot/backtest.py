@@ -51,7 +51,8 @@ class MockBinanceManager(BinanceAPIManager):
             if end_date > datetime.now():
                 end_date = datetime.now()
             end_date = end_date.strftime("%d %b %Y %H:%M:%S")
-            self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
+            # self.logger.info(f"Fetching prices for {ticker_symbol} between {self.datetime} and {end_date}")
+            self.logger.info(f"Fetching prices for {ticker_symbol}, key: {key} - between {self.datetime} and {end_date}")
             for result in self.binance_client.get_historical_klines(
                 ticker_symbol, timeframe, target_date, end_date, limit=1000
             ):
